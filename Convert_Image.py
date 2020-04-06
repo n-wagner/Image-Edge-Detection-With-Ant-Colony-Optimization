@@ -40,8 +40,8 @@ if __name__ == "__main__":
                 fin.save(filename)
                 print("Converted and saved [" + item + "] to directory [" + argv[2] + "]")
             except FileNotFoundError as FNFE:
-                print(type(FNFE).__name__ + ": " + argv[0] + ": invalid path `" + filename + "'\n\t- will attempt to "
-                                                                                        "save within [" + argv[1] + "]")
+                print(type(FNFE).__name__ + ": " + argv[0] + ": invalid path `" + filename +
+                      "'\n\t- will attempt to save within [" + argv[1] + "]")
                 error = True
 
         if(len(argv) == 2 or error == True):
