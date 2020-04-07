@@ -1,6 +1,7 @@
 import os
 import sys
 import random
+from collections import OrderedDict
 from skimage import io
 from PIL import Image, ImageOps
 from pathlib import Path
@@ -20,17 +21,27 @@ class Colony:
     directions = [N, NE, E, SE, S, SW, W, NW]
 
     class Ant:
-        def __init__(self, row, col, colony):
+        def __init__(self, row: int, col: int, colony: "Colony", special=False) -> None:
             """Each ant is given an initial position and the colony it belongs to"""
             self.row = row
             self.col = col
             self.colony = colony
+            self.pos_memory = OrderedDict()
+            self.special = special
 
-        def __str__(self):
+        def __str__(self) -> str:
             """Nicely format an ant to print out"""
             return "[" + str(self.row) + ", " + str(self.col) + "]"
 
-        def index_probability(self, index):
+        def max(self, probabilities_to_pos: dict):
+            keys = list(probabilities_to_pos.keys())
+            keys.sort(reverse=True)
+            for key in keys:
+                if probabilities_to_pos[key] not in self.pos_memory:
+                    return probabilities_to_pos[key]
+            return None
+
+        def index_probability(self, index: tuple):
             """
             Takes the pheromone at an index and raises it to the alpha control
             Takes the intensity at an index and raises it to the beta control
@@ -47,7 +58,8 @@ class Colony:
             """
             numerators = list()
             positions = list()
-            for d in self.colony.directions:
+            # random.shuffle(self.colony.directions)
+            for d in random.sample(self.colony.directions, len(self.colony.directions)):
                 x = self.row + d[0]
                 y = self.col + d[1]
                 if (x < 0 or x >= self.colony.pheromone.shape[0] or y < 0 or y >= self.colony.pheromone.shape[1]):
@@ -56,29 +68,39 @@ class Colony:
                 numerator = self.index_probability((x, y))
                 # positions[numerator] = pos
                 numerators.append(numerator)
-            return (numerators, positions)
+            return numerators, positions
 
         def get_max_probability_pos(self):
             """
-            Finds the maximum probability from the surrounding squares
+            Finds the maximum probability from the surrounding squares that are not in memory
             :return: position of the max probability square
             """
             numerators, positions = self.get_index_probabilities()
             denominator = sum(numerators)
             probabilities = list(x / denominator for x in numerators)
             pos_dict = dict(zip(probabilities, positions))
-            return pos_dict[max(probabilities)]
+            return self.max(probabilities_to_pos=pos_dict)
+
+        def update_memory(self):
+            self.pos_memory[(self.row, self.col)] = None
+            if (len(self.pos_memory) > self.colony.ant_mem):
+                self.pos_memory.popitem(last=False)
 
         def deposit_pheromone(self):
             """
             Deposits pheromone at location if threshold is exceeded, otherwise teleports ant elsewhere
             :return: Nothing
             """
+            self.update_memory()
             pos = self.get_max_probability_pos()
+            if (pos == None):
+                self.row = random.randrange(self.colony.img.shape[0])
+                self.col = random.randrange(self.colony.img.shape[1])
+                return
             row, col = pos
             # for i, j in np.ndindex(self.colony.pheromone[:2]):
             #     self.colony.pheromone[i, j, self.colony.memory_index] = 0
-            if (self.colony.intensities[row, col] > self.colony.b):
+            if (self.colony.intensities[row, col] >= self.colony.b):
                 self.row = row
                 self.col = col
                 self.colony.pheromone[row, col, self.colony.memory_index] = self.colony.intensities[row, col]
@@ -86,8 +108,9 @@ class Colony:
                 self.row = random.randrange(self.colony.img.shape[0])
                 self.col = random.randrange(self.colony.img.shape[1])
 
-    def __init__(self, img_path, img, ant_count, pheromone_evaporation_constant=0.1, ant_memory_constant=20,
-                 minimum_pheromone_constant=0.0001, intensity_threshold_value=0.05, alpha=1.0, beta=1.0):
+    def __init__(self, img_path: str, img: np.ndarray, ant_count: int, pheromone_evaporation_constant=0.1,
+                 pheromone_memory_constant=20, ant_memory_constant=100, minimum_pheromone_constant=0.0001,
+                 intensity_threshold_value=0.05, alpha=1.0, beta=1.0) -> None:
         self.alpha = alpha
         self.beta = beta
         self.img_path = img_path
@@ -98,8 +121,9 @@ class Colony:
         self.generate_intensities_image()
         self.ants = list()
         # M x N x m + 1 matrix, m + 1 entry contains total pheromone from other memory layers
-        self.pheromone = np.zeros(shape=(img.shape[0], img.shape[1], ant_memory_constant + 1))
-        self.m = ant_memory_constant
+        self.pheromone = np.zeros(shape=(img.shape[0], img.shape[1], pheromone_memory_constant + 1))
+        self.m = pheromone_memory_constant
+        self.ant_mem = ant_memory_constant
         self.tau_min = minimum_pheromone_constant
         # Initialize total pheromone layer to min amount
         for i, j in np.ndindex(self.pheromone.shape[:2]):
@@ -119,9 +143,23 @@ class Colony:
                     pairs.add(pair)
                     break
             row, col = pair
-            self.ants.append(Colony.Ant(row, col, self))
+            if (ant % 100 == 0):
+                self.ants.append(Colony.Ant(row=row, col=col, colony=self, special=True))
+            else:
+                self.ants.append(Colony.Ant(row=row, col=col, colony=self))
 
-    def pixel_intensity(self, row, col):
+    def __str__(self) -> str:
+        ants_list = ['Selection of Ants:\n']
+        # count = 0;
+        for i, ant in enumerate(self.ants):
+            if (ant.special == True):
+                ants_list.extend(['\t', ant.__str__(), '\n'])
+        ants_list.append(self.pheromone[:, :, -1].__str__())
+        ants_list.append('\n')
+        ants_list.append(self.pheromone[:, :, self.memory_index].__str__())
+        return ''.join(ants_list)
+
+    def pixel_intensity(self, row: int, col: int) -> float:
         """
         Caclulates the intensity/importance of a given pixel by looking at surrounding pixels
         :param row: x index for the pixel
@@ -142,6 +180,9 @@ class Colony:
         """
         for i, j in np.ndindex(self.img.shape):
             self.intensities[i, j] = self.pixel_intensity(i, j)
+        print("Intensity: max: " + str(self.intensities.max()) + " min: " + str(self.intensities.min()) +
+              " average intensity: " + str(self.intensities.mean()))
+        print(self.intensities)
         # Image.fromarray(self.intensities, 'L').show()
 
     def generate_intensities_image(self):
@@ -239,11 +280,13 @@ class Colony:
         :return: Nothing
         """
         for i in range(iterations):
-            if (i % 10 == 0):
+            if ((i + 1) % 10 == 0):
                 print("Iteration: " + str(i + 1))
                 self.generate_pheromone_image(iteration=(i + 1))
             for ant in self.ants:
                 ant.deposit_pheromone()
+            if ((i + 1) % 10 == 0):
+                print(self)
             self.adjust_pheromone()
         print("Max: " + str(self.pheromone[:, :, -1].max()))
         print(self.pheromone[:, :, -1])
@@ -293,8 +336,9 @@ if __name__ == "__main__":
         print("[" + item + "] size: " + str(img.shape) + " len: " + str(img.shape[0] * img.shape[1]))
         print(img)
         print(img.max())
-        c = Colony(img_path=path, img=img, ant_count=1500, pheromone_evaporation_constant=0.001,
-                   ant_memory_constant=20, intensity_threshold_value=0.005, alpha=1.5, beta=2.0)
+        c = Colony(img_path=path, img=img, ant_count=750, pheromone_evaporation_constant=0.04,
+                   pheromone_memory_constant=30, ant_memory_constant=30, intensity_threshold_value=0.08, alpha=1.5,
+                   beta=1.0)
         clean_path = os.path.join(argv[1], "Iterations", item.split('.')[0])
         c.clean_up(dir_path=clean_path)
         c.iterate(1000)
