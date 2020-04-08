@@ -199,8 +199,14 @@ class Colony:
             abs(int(self.img[row - 1, col    ]) - int(self.img[row + 1, col    ])) if (row - 1 >= 0 and row + 1 < self.img.shape[0]) else 0
         )
 
-    def normalize_intensities(self):
-        return stats.zscore(self.intensities)
+    def perform_max_normalization_intentsities(self):
+        max_val = self.intensities.max()
+        for i, j in np.ndindex(self.intensities.shape):
+            self.intensities[i, j] /= max_val
+        return self.intensities
+
+    def normalize_intensities(self, zscore=True):
+        return stats.zscore(self.intensities) if zscore else self.perform_max_normalization_intentsities()
 
     def set_pixel_intensities(self):
         """
@@ -209,7 +215,7 @@ class Colony:
         """
         for i, j in np.ndindex(self.img.shape):
             self.intensities[i, j] = self.pixel_intensity(i, j)
-        self.intensities = self.normalize_intensities()
+        self.intensities = self.normalize_intensities(zscore=False)
         print("Intensity: max: " + str(self.intensities.max()) + " min: " + str(self.intensities.min()) +
               " average intensity: " + str(self.intensities.mean()))
         print(self.intensities)
