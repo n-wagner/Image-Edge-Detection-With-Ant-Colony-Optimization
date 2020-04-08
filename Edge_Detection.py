@@ -5,6 +5,7 @@ from collections import OrderedDict
 from skimage import io
 from PIL import Image, ImageOps
 from pathlib import Path
+from scipy import stats
 import numpy as np
 import itertools
 
@@ -26,7 +27,7 @@ class Colony:
             self.row = row
             self.col = col
             self.colony = colony
-            self.pos_memory = OrderedDict()
+            # self.pos_memory = OrderedDict()
             self.special = special
 
         def __str__(self) -> str:
@@ -35,11 +36,13 @@ class Colony:
 
         def max(self, probabilities_to_pos: dict):
             keys = list(probabilities_to_pos.keys())
-            keys.sort(reverse=True)
-            for key in keys:
-                if probabilities_to_pos[key] not in self.pos_memory:
-                    return probabilities_to_pos[key]
-            return None
+            max_key = max(keys)
+            return probabilities_to_pos[max_key]
+            # keys.sort(reverse=True)
+            # for key in keys:
+            #     if probabilities_to_pos[key] not in self.colony.pos_memory:
+            #         return probabilities_to_pos[key]
+            # return None
 
         def index_probability(self, index: tuple):
             """
@@ -64,6 +67,8 @@ class Colony:
                 y = self.col + d[1]
                 if (x < 0 or x >= self.colony.pheromone.shape[0] or y < 0 or y >= self.colony.pheromone.shape[1]):
                     continue
+                if (x, y) in self.colony.pos_memory:
+                    continue
                 positions.append((x, y))
                 numerator = self.index_probability((x, y))
                 # positions[numerator] = pos
@@ -77,26 +82,34 @@ class Colony:
             """
             numerators, positions = self.get_index_probabilities()
             denominator = sum(numerators)
+            if (denominator == 0):
+                return None
             probabilities = list(x / denominator for x in numerators)
             pos_dict = dict(zip(probabilities, positions))
             return self.max(probabilities_to_pos=pos_dict)
 
         def update_memory(self):
-            self.pos_memory[(self.row, self.col)] = None
-            if (len(self.pos_memory) > self.colony.ant_mem):
-                self.pos_memory.popitem(last=False)
+            self.colony.pos_memory[(self.row, self.col)] = None
+            if (len(self.colony.pos_memory) > self.colony.ant_mem):
+                self.colony.pos_memory.popitem(last=False)
 
         def deposit_pheromone(self):
             """
             Deposits pheromone at location if threshold is exceeded, otherwise teleports ant elsewhere
             :return: Nothing
             """
-            self.update_memory()
+            # self.update_memory()
             pos = self.get_max_probability_pos()
             if (pos == None):
-                self.row = random.randrange(self.colony.img.shape[0])
-                self.col = random.randrange(self.colony.img.shape[1])
+                while (True):
+                    pos = (random.randrange(self.colony.img.shape[0]), random.randrange(self.colony.img.shape[1]))
+                    if pos not in self.colony.pos_memory:
+                        self.row, self.col = pos
+                        break
+                # self.update_memory()
                 return
+                # self.row = random.randrange(self.colony.img.shape[0])
+                # self.col = random.randrange(self.colony.img.shape[1])
             row, col = pos
             # for i, j in np.ndindex(self.colony.pheromone[:2]):
             #     self.colony.pheromone[i, j, self.colony.memory_index] = 0
@@ -104,9 +117,16 @@ class Colony:
                 self.row = row
                 self.col = col
                 self.colony.pheromone[row, col, self.colony.memory_index] = self.colony.intensities[row, col]
+                self.update_memory()
             else:
-                self.row = random.randrange(self.colony.img.shape[0])
-                self.col = random.randrange(self.colony.img.shape[1])
+                while (True):
+                    pos = (random.randrange(self.colony.img.shape[0]), random.randrange(self.colony.img.shape[1]))
+                    if pos not in self.colony.pos_memory:
+                        self.row, self.col = pos
+                        break
+            # self.update_memory()
+                # self.row = random.randrange(self.colony.img.shape[0])
+                # self.col = random.randrange(self.colony.img.shape[1])
 
     def __init__(self, img_path: str, img: np.ndarray, ant_count: int, pheromone_evaporation_constant=0.1,
                  pheromone_memory_constant=20, ant_memory_constant=100, minimum_pheromone_constant=0.0001,
@@ -123,7 +143,8 @@ class Colony:
         # M x N x m + 1 matrix, m + 1 entry contains total pheromone from other memory layers
         self.pheromone = np.zeros(shape=(img.shape[0], img.shape[1], pheromone_memory_constant + 1))
         self.m = pheromone_memory_constant
-        self.ant_mem = ant_memory_constant
+        self.pos_memory = OrderedDict()
+        self.ant_mem = ant_memory_constant * ant_count
         self.tau_min = minimum_pheromone_constant
         # Initialize total pheromone layer to min amount
         for i, j in np.ndindex(self.pheromone.shape[:2]):
@@ -133,20 +154,24 @@ class Colony:
         self.b = intensity_threshold_value
         self.memory_index = 0
         # sets ants on all distinct random pixels
-        pairs = set()
+        # pairs = set()
+        first = True
         for ant in range(ant_count):
             pair = None
             while (True):
                 # nonlocal pair
                 pair = (random.randrange(self.img.shape[0]), random.randrange(self.img.shape[1]))
-                if pair not in pairs:
-                    pairs.add(pair)
+                if pair not in self.pos_memory:
+                    self.pos_memory[pair] = None
+                    # pairs.add(pair)
                     break
             row, col = pair
-            if (ant % 100 == 0):
-                self.ants.append(Colony.Ant(row=row, col=col, colony=self, special=True))
-            else:
-                self.ants.append(Colony.Ant(row=row, col=col, colony=self))
+            self.ants.append(Colony.Ant(row=row, col=col, colony=self, special=first))
+            if (first == True): # (ant % 100 == 0):
+                first = False
+                # self.ants.append(Colony.Ant(row=row, col=col, colony=self, special=first))
+            # else:
+            #     self.ants.append(Colony.Ant(row=row, col=col, colony=self))
 
     def __str__(self) -> str:
         ants_list = ['Selection of Ants:\n']
@@ -154,9 +179,9 @@ class Colony:
         for i, ant in enumerate(self.ants):
             if (ant.special == True):
                 ants_list.extend(['\t', ant.__str__(), '\n'])
-        ants_list.append(self.pheromone[:, :, -1].__str__())
-        ants_list.append('\n')
-        ants_list.append(self.pheromone[:, :, self.memory_index].__str__())
+        # ants_list.append(self.pheromone[:, :, -1].__str__())
+        # ants_list.append('\n')
+        # ants_list.append(self.pheromone[:, :, self.memory_index].__str__())
         return ''.join(ants_list)
 
     def pixel_intensity(self, row: int, col: int) -> float:
@@ -166,12 +191,16 @@ class Colony:
         :param col: y index for the pixel
         :return: Normalized maximum intensity
         """
-        return (1 / self.i_max) * max(
+        # (1 / self.i_max)
+        return max(
             abs(int(self.img[row - 1, col - 1]) - int(self.img[row + 1, col + 1])) if (row - 1 >= 0 and col - 1 >= 0 and row + 1 < self.img.shape[0] and col + 1 < self.img.shape[1]) else 0,
             abs(int(self.img[row - 1, col + 1]) - int(self.img[row + 1, col - 1])) if (row - 1 >= 0 and col - 1 >= 0 and row + 1 < self.img.shape[0] and col + 1 < self.img.shape[1]) else 0,
             abs(int(self.img[row    , col - 1]) - int(self.img[row    , col + 1])) if (col - 1 >= 0 and col + 1 < self.img.shape[1]) else 0,
             abs(int(self.img[row - 1, col    ]) - int(self.img[row + 1, col    ])) if (row - 1 >= 0 and row + 1 < self.img.shape[0]) else 0
         )
+
+    def normalize_intensities(self):
+        return stats.zscore(self.intensities)
 
     def set_pixel_intensities(self):
         """
@@ -180,6 +209,7 @@ class Colony:
         """
         for i, j in np.ndindex(self.img.shape):
             self.intensities[i, j] = self.pixel_intensity(i, j)
+        self.intensities = self.normalize_intensities()
         print("Intensity: max: " + str(self.intensities.max()) + " min: " + str(self.intensities.min()) +
               " average intensity: " + str(self.intensities.mean()))
         print(self.intensities)
@@ -198,7 +228,7 @@ class Colony:
         base = os.path.basename(self.img_path)
         # adjusted_path = os.path.join(os.path.dirname(self.img_path), "intensities_", base)
         final_path = os.path.join(intensities_path, base)
-        arr = self.convert_to_gray(self.intensities)
+        arr = self.convert_to_gray(self.intensities, binary=True)
         generate_image_from_array(path=final_path, array=arr)
         # Image.fromarray(self.intensities, 'L').save(final_path)
 
@@ -219,7 +249,7 @@ class Colony:
             self.pheromone[i, j, self.memory_index] = 0
 
     # @staticmethod
-    def convert_to_gray(self, arr):
+    def convert_to_gray(self, arr, binary=True):
         """
         Converts a given 2d ndarray to gray-scaling
         :param arr: 2d ndarray
@@ -228,8 +258,17 @@ class Colony:
         arr = arr.copy()
         old_max = arr.max()
         old_min = arr.min()
+        old_avg = arr.mean()
+        print("Old min: " + str(old_min) + " old max: " + str(old_max) + " range: " + str(old_max - old_min) +
+              " average: " + str(old_avg))
         for i, j in np.ndindex(arr.shape):
-            arr[i, j] = (((255 - 0) * (arr[i, j] - old_min)) / (old_max - old_min)) + 0
+            if (binary == True):
+                if (arr[i, j] >= old_avg):
+                    arr[i, j] = 255
+                else:
+                    arr[i, j] = 0
+            else:
+                arr[i, j] = (((255 - 0) * (arr[i, j] - old_min)) / (old_max - old_min)) + 0
         return arr
 
     def generate_pheromone_image(self, iteration):
@@ -280,12 +319,13 @@ class Colony:
         :return: Nothing
         """
         for i in range(iterations):
+            print("Iteration: " + str(i + 1))
             if ((i + 1) % 10 == 0):
-                print("Iteration: " + str(i + 1))
+                # print("Iteration: " + str(i + 1))
                 self.generate_pheromone_image(iteration=(i + 1))
             for ant in self.ants:
                 ant.deposit_pheromone()
-            if ((i + 1) % 10 == 0):
+            if (True):  # ((i + 1) % 10 == 0):
                 print(self)
             self.adjust_pheromone()
         print("Max: " + str(self.pheromone[:, :, -1].max()))
@@ -335,10 +375,10 @@ if __name__ == "__main__":
             continue
         print("[" + item + "] size: " + str(img.shape) + " len: " + str(img.shape[0] * img.shape[1]))
         print(img)
-        print(img.max())
-        c = Colony(img_path=path, img=img, ant_count=750, pheromone_evaporation_constant=0.04,
-                   pheromone_memory_constant=30, ant_memory_constant=30, intensity_threshold_value=0.08, alpha=1.5,
-                   beta=1.0)
+        print("Image: max: " + str(img.max()) + " min: " + str(img.min()) + " mean: " + str(img.mean()))
+        c = Colony(img_path=path, img=img, ant_count=750, pheromone_evaporation_constant=0.001,
+                   pheromone_memory_constant=30, ant_memory_constant=30, intensity_threshold_value=0.0967,
+                   alpha=2.5, beta=2.0)
         clean_path = os.path.join(argv[1], "Iterations", item.split('.')[0])
         c.clean_up(dir_path=clean_path)
         c.iterate(1000)
