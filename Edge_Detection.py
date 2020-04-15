@@ -34,10 +34,11 @@ class Colony:
             """Nicely format an ant to print out"""
             return "[" + str(self.row) + ", " + str(self.col) + "]"
 
-        def max(self, probabilities_to_pos: dict):
-            keys = list(probabilities_to_pos.keys())
-            max_key = max(keys)
-            return probabilities_to_pos[max_key]
+        def probabilistic_choice(self, positions: list, probabilities: list) -> tuple:
+            return random.choices(population=positions, weights=probabilities, k=1)[0]
+            # keys = list(probabilities_to_pos.keys())
+            # max_key = max(keys)
+            # return probabilities_to_pos[max_key]
             # keys.sort(reverse=True)
             # for key in keys:
             #     if probabilities_to_pos[key] not in self.colony.pos_memory:
@@ -84,9 +85,10 @@ class Colony:
             denominator = sum(numerators)
             if (denominator == 0):
                 return None
-            probabilities = list(x / denominator for x in numerators)
-            pos_dict = dict(zip(probabilities, positions))
-            return self.max(probabilities_to_pos=pos_dict)
+            # TODO: Evaluate if this needs to be * 100 or not to convert to %?
+            probabilities = list((x / denominator) * 100 for x in numerators)
+            # pos_dict = dict(zip(probabilities, positions))
+            return self.probabilistic_choice(positions=positions, probabilities=probabilities)
 
         def update_memory(self):
             self.colony.pos_memory[(self.row, self.col)] = None
@@ -128,9 +130,11 @@ class Colony:
                 # self.row = random.randrange(self.colony.img.shape[0])
                 # self.col = random.randrange(self.colony.img.shape[1])
 
-    def __init__(self, img_path: str, img: np.ndarray, ant_count: int, pheromone_evaporation_constant=0.1,
-                 pheromone_memory_constant=20, ant_memory_constant=100, minimum_pheromone_constant=0.0001,
-                 intensity_threshold_value=0.05, alpha=1.0, beta=1.0) -> None:
+    def __init__(self, img_path: str, img: np.ndarray, ant_count=-1, pheromone_evaporation_constant=0.1,
+                 pheromone_memory_constant=20, ant_memory_constant=20, minimum_pheromone_constant=0.0001,
+                 intensity_threshold_value=-1.0, alpha=1.0, beta=1.0) -> None:
+        if (ant_count <= 0):
+            ant_count = max(img.shape[0], img.shape[1]) * 3
         self.alpha = alpha
         self.beta = beta
         self.img_path = img_path
@@ -138,7 +142,7 @@ class Colony:
         self.i_max = img.max()
         self.intensities = np.empty(shape=(self.img.shape[0], self.img.shape[1]))
         self.set_pixel_intensities()
-        self.generate_intensities_image()
+        self.generate_intensities_image(invert=False, binary=True)
         self.ants = list()
         # M x N x m + 1 matrix, m + 1 entry contains total pheromone from other memory layers
         self.pheromone = np.zeros(shape=(img.shape[0], img.shape[1], pheromone_memory_constant + 1))
@@ -151,7 +155,7 @@ class Colony:
             self.pheromone[i, j, -1] = self.tau_min
         # self.pheromone.fill(self.tau_min)
         self.p = pheromone_evaporation_constant
-        self.b = intensity_threshold_value
+        self.b = intensity_threshold_value if intensity_threshold_value > 0 else self.intensities.mean()
         self.memory_index = 0
         # sets ants on all distinct random pixels
         # pairs = set()
@@ -193,6 +197,15 @@ class Colony:
         """
         # (1 / self.i_max)
         return max(
+            abs(int(self.img[row - 2, col - 2]) - int(self.img[row + 2, col + 2])) if (row - 2 >= 0 and col - 2 >= 0 and row + 2 < self.img.shape[0] and col + 2 < self.img.shape[1]) else 0,
+            abs(int(self.img[row - 2, col - 1]) - int(self.img[row + 2, col + 1])) if (row - 2 >= 0 and col - 1 >= 0 and row + 2 < self.img.shape[0] and col + 1 < self.img.shape[1]) else 0,
+            abs(int(self.img[row - 2, col    ]) - int(self.img[row + 2, col    ])) if (row - 2 >= 0 and row + 2 < self.img.shape[0]) else 0,
+            abs(int(self.img[row - 2, col + 1]) - int(self.img[row + 2, col - 1])) if (row - 2 >= 0 and col - 1 >= 0 and row + 2 < self.img.shape[0] and col + 1 < self.img.shape[1]) else 0,
+            abs(int(self.img[row - 2, col + 2]) - int(self.img[row + 2, col - 2])) if (row - 2 >= 0 and col - 2 >= 0 and row + 2 < self.img.shape[0] and col + 2 < self.img.shape[1]) else 0,
+            abs(int(self.img[row - 1, col + 2]) - int(self.img[row + 1, col - 2])) if (row - 1 >= 0 and col - 2 >= 0 and row + 1 < self.img.shape[0] and col + 2 < self.img.shape[1]) else 0,
+            abs(int(self.img[row    , col + 2]) - int(self.img[row    , col - 2])) if (col - 2 >= 0 and col + 2 < self.img.shape[1]) else 0,
+            abs(int(self.img[row + 1, col + 2]) - int(self.img[row - 1, col - 2])) if (row - 1 >= 0 and col - 2 >= 0 and row + 1 < self.img.shape[0] and col + 2 < self.img.shape[1]) else 0,
+
             abs(int(self.img[row - 1, col - 1]) - int(self.img[row + 1, col + 1])) if (row - 1 >= 0 and col - 1 >= 0 and row + 1 < self.img.shape[0] and col + 1 < self.img.shape[1]) else 0,
             abs(int(self.img[row - 1, col + 1]) - int(self.img[row + 1, col - 1])) if (row - 1 >= 0 and col - 1 >= 0 and row + 1 < self.img.shape[0] and col + 1 < self.img.shape[1]) else 0,
             abs(int(self.img[row    , col - 1]) - int(self.img[row    , col + 1])) if (col - 1 >= 0 and col + 1 < self.img.shape[1]) else 0,
@@ -216,12 +229,12 @@ class Colony:
         for i, j in np.ndindex(self.img.shape):
             self.intensities[i, j] = self.pixel_intensity(i, j)
         self.intensities = self.normalize_intensities(zscore=False)
-        print("Intensity: max: " + str(self.intensities.max()) + " min: " + str(self.intensities.min()) +
-              " average intensity: " + str(self.intensities.mean()))
+        print("Intensity: type: " + str(self.intensities.dtype) + " max: " + str(self.intensities.max()) + " min: " +
+              str(self.intensities.min()) + " average intensity: " + str(self.intensities.mean()))
         print(self.intensities)
         # Image.fromarray(self.intensities, 'L').show()
 
-    def generate_intensities_image(self):
+    def generate_intensities_image(self, invert=True, binary=True):
         """
         Creates and stores the intensities matrix as a normal gray-scale image
         :return: Nothing
@@ -234,8 +247,8 @@ class Colony:
         base = os.path.basename(self.img_path)
         # adjusted_path = os.path.join(os.path.dirname(self.img_path), "intensities_", base)
         final_path = os.path.join(intensities_path, base)
-        arr = self.convert_to_gray(self.intensities, binary=True)
-        generate_image_from_array(path=final_path, array=arr)
+        arr = self.convert_to_gray(self.intensities, binary=binary)
+        generate_image_from_array(path=final_path, array=arr, invert=invert)
         # Image.fromarray(self.intensities, 'L').save(final_path)
 
     def adjust_pheromone(self): # (self, row, column):
@@ -255,27 +268,31 @@ class Colony:
             self.pheromone[i, j, self.memory_index] = 0
 
     # @staticmethod
-    def convert_to_gray(self, arr, binary=True):
+    def convert_to_gray(self, arr: np.ndarray, binary=True):
         """
         Converts a given 2d ndarray to gray-scaling
         :param arr: 2d ndarray
         :return: arr
         """
-        arr = arr.copy()
+        arr_fixed = np.zeros(shape=arr.shape, dtype=np.dtype(np.uint8))
         old_max = arr.max()
         old_min = arr.min()
         old_avg = arr.mean()
-        print("Old min: " + str(old_min) + " old max: " + str(old_max) + " range: " + str(old_max - old_min) +
-              " average: " + str(old_avg))
+        print("Converting to image ...")
+        print("\tOld type: " + str(arr.dtype) + " Old min: " + str(old_min) + " old max: " + str(old_max) +
+              " old range: " + str(old_max - old_min) + " old average: " + str(old_avg))
         for i, j in np.ndindex(arr.shape):
             if (binary == True):
                 if (arr[i, j] >= old_avg):
-                    arr[i, j] = 255
+                    arr_fixed[i, j] = 255
                 else:
-                    arr[i, j] = 0
+                    arr_fixed[i, j] = 0
             else:
-                arr[i, j] = (((255 - 0) * (arr[i, j] - old_min)) / (old_max - old_min)) + 0
-        return arr
+                arr_fixed[i, j] = int((((255 - 0) * (arr[i, j] - old_min)) / (old_max - old_min)) + 0 + 0.5)
+        print("\tNew type: " + str(arr_fixed.dtype) + " new min: " + str(arr_fixed.min()) + " new max: " +
+              str(arr_fixed.max()) + " new range: " + str(arr_fixed.max() - arr_fixed.min()) + " new average: " +
+              str(arr_fixed.mean()))
+        return arr_fixed  # arr.astype(dtype=np.dtype(np.uint8), casting='unsafe', copy=True)
 
     def generate_pheromone_image(self, iteration):
         """
@@ -308,7 +325,8 @@ class Colony:
         try:
             entries = os.listdir(path=dir_path)
         except FileNotFoundError as FNFE:
-            print(type(FNFE).__name__ + ": " + argv[0] + ": " + str(FNFE), file=sys.stderr)
+            # print(type(FNFE).__name__ + ": " + argv[0] + ": " + str(FNFE), file=sys.stderr)
+            print("Nothing to clean!")
             return
         for entry in entries:
             path = os.path.join(dir_path, entry)
@@ -318,12 +336,15 @@ class Colony:
                 break
         print("Done cleaning!")
 
-    def iterate(self, iterations):
+    def iterate(self, iterations=-1):
         """
         Performs iterations number of iterations of the ACO algorithm
         :param iterations: number of iterations to perform
         :return: Nothing
         """
+        if iterations <= 0:
+            iterations = max(self.img.shape[0], self.img.shape[1])
+        print("Iterations: " + str(iterations))
         for i in range(iterations):
             print("Iteration: " + str(i + 1))
             if ((i + 1) % 10 == 0):
@@ -339,7 +360,7 @@ class Colony:
         print(self.convert_to_gray(self.pheromone[:, :, -1]))
 
 
-def generate_image_from_array (path, array):
+def generate_image_from_array (path, array, invert=True):
     """
     Inverts the array scheme and physically saves it
     :param path: directory to store
@@ -349,8 +370,9 @@ def generate_image_from_array (path, array):
     dir_base = os.path.dirname(path)
     Path(dir_base).mkdir(parents=True, exist_ok=True)
     img = Image.fromarray(array, 'L')
-    inverted_img = ImageOps.invert(img)
-    inverted_img.save(path)
+    if (invert == True):
+        img = ImageOps.invert(img)
+    img.save(path)
 
 
 if __name__ == "__main__":
@@ -381,11 +403,12 @@ if __name__ == "__main__":
             continue
         print("[" + item + "] size: " + str(img.shape) + " len: " + str(img.shape[0] * img.shape[1]))
         print(img)
-        print("Image: max: " + str(img.max()) + " min: " + str(img.min()) + " mean: " + str(img.mean()))
-        c = Colony(img_path=path, img=img, ant_count=750, pheromone_evaporation_constant=0.001,
-                   pheromone_memory_constant=30, ant_memory_constant=30, intensity_threshold_value=0.0967,
+        print("Image: type: " + str(img.dtype) + " max: " + str(img.max()) + " min: " + str(img.min()) + " mean: " +
+              str(img.mean()))
+        c = Colony(img_path=path, img=img, ant_count=-1, pheromone_evaporation_constant=0.001,
+                   pheromone_memory_constant=30, ant_memory_constant=30, intensity_threshold_value=-1.0,
                    alpha=2.5, beta=2.0)
         clean_path = os.path.join(argv[1], "Iterations", item.split('.')[0])
         c.clean_up(dir_path=clean_path)
-        c.iterate(1000)
+        c.iterate(iterations=-1)
         # c.adjust_pheromone()
